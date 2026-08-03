@@ -1,0 +1,24 @@
+[package]
+name = "cm-testshop"
+version = "0.1.0"
+edition = "2024"
+description = "A fake NL guest checkout, served locally, for developing and proving the scanner"
+publish = false
+license = "UNLICENSED"
+
+[[bin]]
+name = "cm-testshop"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+tower-http = { version = "0.7", features = ["trace"] }
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sha2 = "0.11"
+hex = "0.4"
+
+[profile.release]
+opt-level = 2
