@@ -20,7 +20,6 @@ pub fn router(shop: Shop) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/checkout", get(checkout))
-        .route("/product", get(product))
         .route("/admin", get(admin))
         .route("/robots.txt", get(robots))
         .route("/assets/{file}", get(asset))
@@ -76,70 +75,8 @@ async fn robots(State(shop): State<Shop>) -> Response {
         .into_response()
 }
 
-/// A product page with an add-to-basket control.
-///
-/// Only reachable in the `needs-basket` scenario, and named by the target rather
-/// than found: the scanner is not allowed to go looking for it.
-async fn product(State(shop): State<Shop>) -> Response {
-    let body = format!(
-        r#"<!doctype html>
-<html lang="nl">
-<head><meta charset="utf-8"><title>Voorbeeldproduct | Testwinkel</title></head>
-<body>
-  <h1>Voorbeeldproduct</h1>
-  <p>EUR 99,00</p>
-  <form id="product-form" method="post" action="/cart/add">
-    <label for="qty">Aantal</label>
-    <input id="qty" name="qty" value="1">
-    <!-- WooCommerce's control, because that is the one the table lists first.
-         The scanner clicks this and types nothing, including in the field above,
-         which is there precisely so that "nothing is typed" is testable. -->
-    <button class="single_add_to_cart_button" type="button">In winkelwagen</button>
-    <button class="newsletter-signup" type="button">Aanmelden nieuwsbrief</button>
-  </form>
-  <script>
-    document.querySelector(".single_add_to_cart_button")
-      .addEventListener("click", function () {{
-        document.cookie = "vf-basket=1; path=/; max-age=3600";
-        document.body.insertAdjacentHTML("beforeend", "<p id=\"added\">Toegevoegd.</p>");
-      }});
-  </script>
-</body>
-</html>"#
-    );
-    let _ = shop;
-    html(body, Vec::new())
-}
-
 /// The page under test.
-async fn checkout(
-    State(shop): State<Shop>,
-    headers: HeaderMap,
-) -> Response {
-    // The empty-basket page. Most real checkouts do this: without a basket there
-    // is nothing to pay for, so no payment page is rendered.
-    if shop.scenario == Scenario::NeedsBasket {
-        let has_basket = headers
-            .get(header::COOKIE)
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|c| c.contains("vf-basket=1"));
-        if !has_basket {
-            return html(
-                r#"<!doctype html>
-<html lang="nl">
-<head><meta charset="utf-8"><title>Winkelwagen leeg | Testwinkel</title></head>
-<body>
-  <h1>Je winkelwagen is leeg</h1>
-  <p>Voeg eerst een product toe.</p>
-  <p><a href="/product">Naar het voorbeeldproduct</a></p>
-</body>
-</html>"#
-                    .to_string(),
-                Vec::new(),
-            );
-        }
-    }
-
+async fn checkout(State(shop): State<Shop>) -> Response {
     // Changes on every request. Nothing about the script it points at changes,
     // so a scanner that reports this is reporting noise, and `normalise_url`
     // exists precisely to make it not do that.

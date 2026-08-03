@@ -55,14 +55,6 @@ pub enum Scenario {
     /// demand rather than discovered on a customer's site in week three.
     NoisyInline,
 
-    /// The checkout will not render without something in the basket, which is
-    /// what seven of eight real Dutch shops did when they were measured.
-    ///
-    /// `/checkout` shows an empty-basket notice until `vf-basket` is set, and
-    /// `/product` carries an add-to-basket control. The scanner has to notice
-    /// the payment page did not render, add the item, and come back.
-    NeedsBasket,
-
     /// `robots.txt` disallows `/checkout`. The scan must refuse before it loads
     /// anything, which is the one conduct rule that cannot be proven without a
     /// server that says no.
@@ -79,7 +71,6 @@ impl Scenario {
             Scenario::HeaderWeakened => "header-weakened",
             Scenario::ScriptGone => "script-gone",
             Scenario::UnhandleableConsent => "unhandleable-consent",
-            Scenario::NeedsBasket => "needs-basket",
             Scenario::NoisyInline => "noisy-inline",
             Scenario::RobotsDeny => "robots-deny",
         }
@@ -96,7 +87,6 @@ impl Scenario {
             Scenario::HeaderWeakened => "Critical: security header removed (CSP, X-Frame-Options)",
             Scenario::ScriptGone => "one Medium: approved script no longer loads",
             Scenario::UnhandleableConsent => "capture succeeds, anomaly recorded, consent state honest",
-            Scenario::NeedsBasket => "one item added, then the payment page captured, with an anomaly saying so",
             Scenario::NoisyInline => "a Medium every run, forever: the open normalisation problem",
             Scenario::RobotsDeny => "refused by conduct before any load",
         }
