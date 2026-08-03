@@ -3,9 +3,8 @@
 A fake Dutch guest checkout, served from five local origins, for developing and
 proving a third-party-script scanner against something you own.
 
-It exists because the failure mode of a scanner is working beautifully on
-invented input. This shop is built to contain the things that are hard rather
-than the things that are easy:
+It exists because a scanner can pass on invented input and fail on a real page.
+This shop is built to contain the hard cases:
 
 - a tag manager that inserts its children after the parse, including one inline
   script that has no URL and appears in no HTML source
@@ -31,8 +30,8 @@ next four ports. `--help` lists every scenario and what each one should produce.
 ## Why it is public
 
 Scanning rules worth trusting say to develop against a site you own. This is
-that site. It is published so the claim can be checked: the scenarios here are
-the cases a scanner has to survive, and anyone can run them.
+that site, published so the claim can be checked: the scenarios here are the
+cases a scanner has to survive, and anyone can run them.
 
 Nothing in this repository talks to a real shop, and it has no network egress
 beyond serving itself on localhost.

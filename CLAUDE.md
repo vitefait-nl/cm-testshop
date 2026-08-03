@@ -9,13 +9,12 @@ The conduct rules the scanner enforces say to test against a site you own. This
 is that site. Develop against it. Do not develop against a stranger's shop and
 do not add a scenario that needs one.
 
-It follows that this shop should keep growing in the direction of being
-*harder*, not easier. Every scenario exists because some rule in the scanner
-claims to handle a case, and a scenario is how that claim gets tested against a
-real browser load rather than a hand-written fixture. When a run against real
-shops turns up something the scanner gets wrong, the fix is a scenario here
-first and then a rule change, so the rule change has something to be measured
-against afterwards.
+This shop should keep growing in the direction of being *harder*, not easier.
+Every scenario exists because some rule in the scanner claims to handle a case,
+and the scenario is how that claim gets tested against a real browser load
+rather than a hand-written fixture. When a run against real shops turns up
+something the scanner gets wrong, add a scenario here first and change the rule
+second, so the rule change has something to be measured against.
 
 ## Writing style
 
