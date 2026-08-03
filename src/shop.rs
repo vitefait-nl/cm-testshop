@@ -1,10 +1,8 @@
 //! The merchant's own origin: the checkout page, its bundle, and `robots.txt`.
 //!
-//! The page is built to look like an ordinary Dutch guest checkout that collects
-//! card details on its own domain, because that is the shape the product is sold
-//! against: SAQ A-EP or D, where 6.4.3 and 11.6.1 actually apply. A shop that
-//! redirects to the provider's hosted page is out of scope and is the thing
-//! `ProspectFinding::qualifies` disqualifies.
+//! Card fields are collected on this origin rather than in a hosted redirect,
+//! because that is the shape the product is sold against (SAQ A-EP or D, where
+//! 6.4.3 and 11.6.1 apply) and the shape `ProspectFinding::qualifies` accepts.
 
 use axum::body::Body;
 use axum::extract::State;
@@ -26,10 +24,9 @@ pub fn router(shop: Shop) -> Router {
         .with_state(shop)
 }
 
-/// A landing page, so `/checkout` is reached the way a shopper reaches it: by a
-/// link. The conduct rules forbid requesting a URL that was not linked from the
-/// page under test, and a scanner developed against a shop with no link in it
-/// would never exercise that.
+/// A landing page, so `/checkout` is reached by a link. The conduct rules
+/// forbid requesting a URL that was not linked from the page under test, and
+/// that cannot be exercised against a shop with no links.
 async fn home(State(shop): State<Shop>) -> Response {
     let body = format!(
         r#"<!doctype html>
@@ -47,8 +44,8 @@ async fn home(State(shop): State<Shop>) -> Response {
     html(body, Vec::new())
 }
 
-/// Disallowed in `robots.txt` in every scenario. Nothing here matters; its only
-/// job is to exist at a path the crawler must never fetch.
+/// Disallowed in `robots.txt` in every scenario: a path the crawler must never
+/// fetch. The content is irrelevant.
 async fn admin() -> Response {
     html(
         "<!doctype html><html lang=\"nl\"><body><h1>Beheer</h1></body></html>".to_string(),
@@ -57,9 +54,8 @@ async fn admin() -> Response {
 }
 
 async fn robots(State(shop): State<Shop>) -> Response {
-    // `/admin` is always disallowed. The `robots-deny` scenario additionally
-    // disallows the checkout itself, which is the case that proves the conduct
-    // gate refuses before anything loads.
+    // `/admin` is always disallowed; `robots-deny` disallows the checkout too,
+    // which is what proves the conduct gate refuses before anything loads.
     let text = match shop.scenario {
         Scenario::RobotsDeny => {
             "User-agent: *\nDisallow: /admin\nDisallow: /checkout\n\nSitemap: /sitemap.xml\n"
@@ -77,14 +73,11 @@ async fn robots(State(shop): State<Shop>) -> Response {
 
 /// The page under test.
 async fn checkout(State(shop): State<Shop>) -> Response {
-    // Changes on every request. Nothing about the script it points at changes,
-    // so a scanner that reports this is reporting noise, and `normalise_url`
-    // exists precisely to make it not do that.
+    // Changes every request while the script behind it does not, which is the
+    // noise `normalise_url` exists to strip.
     let cache_buster = crate::now_secs().to_string();
 
     let psp_tag = if shop.scenario == Scenario::ScriptGone {
-        // The vendor's SDK is simply absent this run. The approved inventory is
-        // now wrong, which is a Medium and worth saying out loud.
         String::new()
     } else {
         format!(
@@ -103,9 +96,8 @@ async fn checkout(State(shop): State<Shop>) -> Response {
   <link rel="stylesheet" href="/assets/checkout.{build}.css">
 
   <script>
-    // An inline script with no URL of its own. A capture built from a DOM walk
-    // at the end of the load can still see this one; the dynamically inserted
-    // inline script further down is the one that needs Debugger.scriptParsed.
+    // An inline script with no URL, but present in the source: a DOM walk
+    // finds this one. The tag manager's inserted inline script does not.
     window.dataLayer = window.dataLayer || [];
     window.dataLayer.push({{ event: "begin_checkout", currency: "EUR", value: 99.00 }});
   </script>
@@ -124,9 +116,7 @@ async fn checkout(State(shop): State<Shop>) -> Response {
       <p>1 x Voorbeeldproduct, EUR 99,00</p>
     </section>
 
-    <!-- Card fields on the merchant's own origin. This is what puts a shop in
-         SAQ A-EP or D, and it is the signal ProspectFinding looks for. The
-         scanner reads this form and never fills or submits it. -->
+    <!-- The scanner reads this form and never fills or submits it. -->
     <form id="payment-form" method="post" action="/checkout/confirm">
       <h2>Betaalgegevens</h2>
       <label for="card-number">Kaartnummer</label>
@@ -157,16 +147,16 @@ async fn checkout(State(shop): State<Shop>) -> Response {
 
 /// First-party assets.
 ///
-/// The filename carries a content hash that changes on every restart of this
-/// binary, which is what a deploy looks like from outside. The body behind it
-/// does not change unless the scenario says so. A scanner that alerts on the
-/// filename is alerting on a deploy; `normalise::group_key` is what stops it.
+/// The filename carries a content hash that changes on every restart, which is
+/// what a deploy looks like from outside; the body behind it changes only when
+/// the scenario says so. `normalise::group_key` is what keeps the rename from
+/// reading as a finding.
 async fn asset(
     State(shop): State<Shop>,
     axum::extract::Path(file): axum::extract::Path<String>,
 ) -> Response {
     if file.ends_with(".css") {
-        return script_like(
+        return asset_response(
             "text/css; charset=utf-8",
             ":root{font-family:system-ui,sans-serif}main{max-width:34rem;margin:2rem auto}\
              input{display:block;width:100%;padding:.5rem;margin:.25rem 0 1rem}"
@@ -178,16 +168,14 @@ async fn asset(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    script_like("application/javascript; charset=utf-8", checkout_js(&shop))
+    asset_response("application/javascript; charset=utf-8", checkout_js(&shop))
 }
 
 /// The shop's own checkout logic.
 fn checkout_js(shop: &Shop) -> String {
     let extra = if shop.scenario == Scenario::FirstPartyChange {
-        // One added line, the size of a real change: enough to move the content
-        // hash, not enough to be obvious to a person reading a diff. That is the
-        // point. A first-party change is High because the shop's own code is
-        // where an attacker who got in would put the skimmer.
+        // One line: enough to move the content hash, not enough for a person
+        // reading the diff to catch.
         "\n  form.dataset.vfRevision = \"2\";"
     } else {
         ""
@@ -224,11 +212,11 @@ fn checkout_js(shop: &Shop) -> String {
 
 /// The consent banner, in the markup of whichever platform was asked for.
 ///
-/// The accept control's id or class is the real one each platform ships, because
-/// that is what `cm-scan::consent` matches on. Imitating the platform loosely
+/// Every accept control's id and class is the real one that platform ships,
+/// because that is what `cm-scan::consent` matches on. Approximating the markup
 /// would make this a test of nothing.
 fn banner_markup(shop: &Shop) -> String {
-    let accept_control = match shop.cmp {
+    let platform_markup = match shop.cmp {
         Cmp::None => return String::new(),
 
         Cmp::Cookiebot => {
@@ -247,8 +235,8 @@ fn banner_markup(shop: &Shop) -> String {
   </div>"#
         }
 
-        // Rendered into a shadow root by the script below, not written here:
-        // the whole point is that the accept control is not in the light DOM.
+        // Rendered into a shadow root by the script below rather than written
+        // here: the point is that the accept control is not in the light DOM.
         Cmp::Usercentrics => {
             return format!(
                 r#"<div id="usercentrics-root"></div>
@@ -287,10 +275,9 @@ fn banner_markup(shop: &Shop) -> String {
         }
     };
 
-    // The unhandleable case: a house-built banner whose accept control carries
-    // no recognisable id, class or accessible name. It is not contrived; plenty
-    // of shops roll their own. The scanner must notice it cannot proceed and say
-    // so, rather than capturing the pre-consent page and calling it post-consent.
+    // A house-built banner whose accept control carries no recognisable id,
+    // class or accessible name. The scanner must say it cannot proceed rather
+    // than capture the pre-consent page and call it post-consent.
     let markup = if shop.scenario == Scenario::UnhandleableConsent {
         r#"<div class="c-x9f2" role="dialog">
     <p>Wij gebruiken cookies.</p>
@@ -298,14 +285,13 @@ fn banner_markup(shop: &Shop) -> String {
   </div>"#
             .to_string()
     } else {
-        accept_control.to_string()
+        platform_markup.to_string()
     };
 
     format!(
         r#"{markup}
   <script>
-    // Consent state lives in one place and is announced once. The tag manager
-    // waits for this event; nothing gated is loaded before it fires.
+    // The tag manager waits for this event; nothing gated loads before it.
     (function () {{
       var banner = document.querySelector('[role="dialog"]');
       if (!banner) return;
@@ -324,12 +310,8 @@ fn banner_markup(shop: &Shop) -> String {
     )
 }
 
-/// The security-relevant response headers on the main document.
-///
-/// Only the main document's headers are recorded by the scanner; subresource
-/// headers are noise. `header-weakened` removes two of them, which is the shape
-/// of a real regression: a CSP dropped during a deploy, nobody notices, and the
-/// page is one injected tag away from a bad afternoon.
+/// The security-relevant response headers on the main document. The scanner
+/// records only these; subresource headers are noise.
 fn security_headers(shop: &Shop) -> Vec<(&'static str, String)> {
     let mut headers = vec![
         (
@@ -352,15 +334,11 @@ fn security_headers(shop: &Shop) -> Vec<(&'static str, String)> {
     ];
 
     if shop.scenario != Scenario::HeaderWeakened {
-        // The `new-origin` scenario permits the rogue origin as well.
-        //
-        // Not a concession: without it the browser blocks the injected script,
-        // it never executes, and the scanner correctly reports nothing, which
-        // makes the scenario a test of Chromium's CSP rather than of this
-        // product. A shop whose CSP already permits the origin an attacker
-        // reaches is the ordinary case in the wild: most NL checkouts carry no
-        // script-src at all, and those that do usually list a wildcard or a tag
-        // manager that can load anything it likes.
+        // `new-origin` must permit the rogue origin, or Chromium blocks the
+        // injected script and the scenario tests the browser's CSP rather than
+        // this product. It is also the ordinary case: most NL checkouts carry
+        // no script-src, and those that do list a wildcard or a tag manager
+        // that can load anything.
         let permitted = if shop.scenario == Scenario::NewOrigin {
             format!(
                 "{cdn} {analytics} {psp} {rogue}",
@@ -397,8 +375,7 @@ fn html(body: String, extra: Vec<(&'static str, String)>) -> Response {
         header::CONTENT_TYPE,
         HeaderValue::from_static("text/html; charset=utf-8"),
     );
-    // No caching anywhere in this shop: a capture must be of what the server
-    // says now, not of what a proxy remembered.
+    // No caching anywhere: a capture must be of what the server says now.
     headers.insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static("no-store, must-revalidate"),
@@ -416,7 +393,7 @@ fn html(body: String, extra: Vec<(&'static str, String)>) -> Response {
     (StatusCode::OK, headers, Body::from(body)).into_response()
 }
 
-pub fn script_like(content_type: &'static str, body: String) -> Response {
+pub fn asset_response(content_type: &'static str, body: String) -> Response {
     (
         StatusCode::OK,
         [

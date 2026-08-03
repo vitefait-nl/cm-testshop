@@ -1,23 +1,12 @@
 //! `cm-testshop`: a fake Dutch guest checkout, served from five local origins.
 //!
-//! This exists because of the sentence at the top of `crawler/CHECKS.md`: the
-//! failure mode of this project is a scanner that works beautifully on invented
-//! input. Every capture the driver produces before Gate 1 comes from here, and
-//! this shop is built to contain the things that are hard rather than the things
-//! that are easy:
-//!
-//! - a tag manager that inserts its children after the parse, including one
-//!   inline script that has no URL and appears in no HTML source
-//! - a bundle filename whose content hash changes on every restart, which is
-//!   what a deploy looks like from outside
-//! - cache-buster query parameters that change on every single request
-//! - three real consent platforms' markup, and one house-built banner that
-//!   cannot be handled, to prove the scanner says so instead of guessing
-//! - security headers that can be taken away
-//! - a `robots.txt` that can say no
-//!
-//! It is also the one target where anything may be tried, which is why the
-//! conduct rules point at "a site you own" and mean this one.
+//! The one target the scanner may do anything to, and the source of every
+//! capture taken before Gate 1. It deliberately serves the hard cases: a tag
+//! manager that inserts its children after the parse (including an inline
+//! script with no URL), a bundle filename whose hash changes every restart,
+//! per-request cache busters, three real consent platforms plus one banner that
+//! cannot be handled, removable security headers, and a `robots.txt` that can
+//! say no.
 //!
 //! ```sh
 //! cargo run
@@ -53,16 +42,12 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = Cmp::Cookiebot)]
     cmp: Cmp,
 
-    /// Pin the bundle's content hash instead of deriving a fresh one.
-    ///
-    /// A fresh one per start is the honest default: it is what a deploy does,
-    /// and a scanner that alerts on it is alerting on a deploy. Pin it when a
-    /// test needs two runs to be byte-identical.
+    /// Pin the bundle's content hash instead of deriving a fresh one per start.
+    /// Use when a test needs two runs to be byte-identical.
     #[arg(long)]
     build_id: Option<String>,
 }
 
-/// Everything a handler needs. Cloned per route; all of it is small.
 #[derive(Clone)]
 pub struct Shop {
     pub scenario: Scenario,
@@ -93,8 +78,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let build_id = cli.build_id.unwrap_or_else(|| {
-        // Eight hex characters, the shape a bundler emits. Derived from the
-        // start time so it changes per run without being random noise.
+        // Eight hex characters, the shape a bundler emits. From the start time,
+        // so it changes per run and is reproducible within one.
         let digest = Sha256::digest(now_secs().to_le_bytes());
         hex::encode(&digest[..4])
     });
@@ -112,8 +97,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         origin_rogue: origin(4),
     };
 
-    // Printed together so the expected result is on screen next to the command
-    // that produces the actual one.
     println!("cm-testshop");
     println!("  scenario   {}  ({})", shop.scenario.as_str(), shop.scenario.expectation());
     println!("  consent    {}", shop.cmp.as_str());
@@ -140,9 +123,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         serve(base + 4, vendors::rogue_router(shop.clone())),
     ];
 
-    // Any listener failing takes the whole shop down. A half-served shop would
-    // produce a capture missing one origin, which is a false Medium and exactly
-    // the sort of invented input this binary exists to avoid.
+    // Any listener failing takes the whole shop down: a capture missing one
+    // origin reads as a false Medium.
     for handle in servers {
         handle.await??;
     }

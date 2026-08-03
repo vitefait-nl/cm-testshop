@@ -1,9 +1,8 @@
 //! The third-party origins.
 //!
-//! Four separate listeners, on four ports, because a port is part of an origin
-//! and origins are the unit the whole product reasons in. Serving all of this
-//! from one port would collapse exactly the distinction the scanner exists to
-//! make.
+//! Four listeners on four ports: a port is part of an origin, and origins are
+//! the unit the scanner reasons in. One shared port would collapse the
+//! distinction under test.
 //!
 //! | Origin      | Plays the part of              | Loaded                      |
 //! |-------------|--------------------------------|-----------------------------|
@@ -18,7 +17,7 @@ use axum::routing::get;
 use axum::Router;
 
 use crate::scenario::Scenario;
-use crate::shop::script_like;
+use crate::shop::asset_response;
 use crate::Shop;
 
 const JS: &str = "application/javascript; charset=utf-8";
@@ -47,15 +46,13 @@ pub fn rogue_router(shop: Shop) -> Router {
 
 /// The tag manager: the reason a DOM walk is not a capture.
 ///
-/// Everything it loads is inserted after the initial parse, by script. Reading
-/// the page's HTML source finds this file and nothing it brings with it, which
-/// is why `Debugger.scriptParsed` rather than a DOM query is the thing the
-/// driver subscribes to.
+/// Everything it loads is inserted after the initial parse, by script, so the
+/// page's HTML source shows this file and nothing it brings with it. Hence the
+/// driver subscribing to `Debugger.scriptParsed`.
 async fn tagmanager(State(shop): State<Shop>) -> Response {
     let rogue_injection = if shop.scenario == Scenario::NewOrigin {
-        // Named to look like something that belongs. Real skimmers are named
-        // like this, and a person scanning a list of URLs does not catch it.
-        // A machine comparing origins against an approved set does.
+        // Named to look like it belongs, as real skimmers are. A person reading
+        // a list of URLs misses it; a machine comparing origins does not.
         format!(
             r#"
     load("{rogue}/lib/analytics-helper.min.js");"#,
@@ -65,15 +62,9 @@ async fn tagmanager(State(shop): State<Shop>) -> Response {
         String::new()
     };
 
-    // The body of the dynamically inserted inline script.
-    //
-    // Deterministic by default so a clean run is actually clean. The timestamped
-    // variant is a real and very common shape, and it is a genuinely open
-    // problem: its content hash differs on every single load, so it produces a
-    // Medium every day forever. `--scenario noisy-inline` reproduces it on
-    // demand, because inventing a normalisation rule for it before it has been
-    // seen on five real shops is exactly the speculation this project cannot
-    // afford. See crawler/CHECKS.md.
+    // Deterministic by default so a clean run is clean. The timestamped variant
+    // hashes differently on every load, so it produces a Medium forever; that
+    // is the open normalisation problem, reproduced on demand.
     let inline_body = if shop.scenario == Scenario::NoisyInline {
         r#"'window.dataLayer.push({ event: "consent_granted", ts: ' + Date.now() + ' });'"#
     } else {
@@ -95,22 +86,18 @@ async fn tagmanager(State(shop): State<Shop>) -> Response {
   function fire() {{
     load("{analytics}/v3/collect.js");{rogue_injection}
 
-    // A dynamically inserted script with no URL at all. This is the case that
-    // separates a real capture from a plausible one: it never appears in the
-    // HTML source, it has no src to record, and Debugger.scriptParsed is the
-    // only place it shows up.
+    // An inserted script with no URL at all: absent from the HTML source,
+    // nothing to record as a src, and visible only via Debugger.scriptParsed.
     var inline = document.createElement("script");
     inline.textContent = {inline_body};
     document.head.appendChild(inline);
   }}
 
   function decide() {{
-    // The banner check has to wait for the body. This file is loaded from
-    // <head>, so querying for the dialog straight away always finds nothing and
-    // every tag fires before consent, which is both a real bug shops have and
-    // the exact thing that makes a pre-consent capture worthless.
-    // Also look for a shadow-DOM banner host, or this shop would fire its tags
-    // before consent whenever the banner is one, which is not what real CMPs do.
+    // This file is loaded from <head>, so the banner check has to wait for
+    // the body; querying straight away finds no dialog and fires every tag
+    // before consent. The shadow-DOM host has to be checked too, or the
+    // Usercentrics banner would be treated as no banner at all.
     if (!document.querySelector('[role="dialog"]') &&
         !document.getElementById("usercentrics-root")) {{
       fire();
@@ -136,14 +123,12 @@ async fn tagmanager(State(shop): State<Shop>) -> Response {
         inline_body = inline_body,
     );
 
-    script_like(JS, body)
+    asset_response(JS, body)
 }
 
-/// The analytics vendor. Ships builds; that is its whole personality.
+/// The analytics vendor, which ships builds.
 async fn collect(State(shop): State<Shop>) -> Response {
     let extra = if shop.scenario == Scenario::VendorUpdate {
-        // A vendor shipping a build is the most common change this product will
-        // ever see. If it wakes anyone at night, the product is broken.
         "\n  send(\"pageview\", { sr: screen.width + \"x\" + screen.height });"
     } else {
         ""
@@ -166,13 +151,13 @@ async fn collect(State(shop): State<Shop>) -> Response {
 "#
     );
 
-    script_like(JS, body)
+    asset_response(JS, body)
 }
 
-/// The payment provider's SDK. Stable, boring, and the one that going missing
-/// means the inventory is wrong rather than that anyone is under attack.
+/// The payment provider's SDK. When this goes missing the approved inventory is
+/// wrong; it is not an attack.
 async fn pay_sdk() -> Response {
-    script_like(
+    asset_response(
         JS,
         r#"// pay.js: the payment provider's client SDK.
 (function () {
@@ -181,8 +166,7 @@ async fn pay_sdk() -> Response {
   window.VfPay = {
     version: "4.2.0",
     tokenise: function (fields) {
-      // A real SDK would post to the provider here. This one is a stub: the
-      // scanner never fills a form and never submits one, so nothing calls it.
+      // A stub: the scanner never fills or submits a form, so nothing calls it.
       return Promise.resolve({ token: "tok_test_stub", fields: Object.keys(fields) });
     }
   };
@@ -194,11 +178,11 @@ async fn pay_sdk() -> Response {
 
 /// The origin nobody approved.
 ///
-/// Deliberately harmless: it reads no fields and sends nothing. What makes it a
-/// Critical finding is not what it does, it is that it is there and no one wrote
-/// down why. That is the entire argument for 6.4.3, and for this product.
+/// Deliberately harmless: it reads no fields and sends nothing. What makes it
+/// Critical is that it is there and unaccounted for, which is the argument
+/// behind 6.4.3.
 async fn rogue() -> Response {
-    script_like(
+    asset_response(
         JS,
         r#"// analytics-helper.min.js
 !function(){"use strict";var e=document.getElementById("payment-form");e&&e.addEventListener("submit",function(){})}();
