@@ -134,7 +134,7 @@ async fn cart_add(State(shop): State<Shop>, Path(id): Path<String>) -> Response 
 }
 
 /// The basket page of a shop whose checkout has no stable URL: the control
-/// leads to a token URL minted per visit, as Shopify does.
+/// leads to a token URL minted per visit.
 async fn token_basket() -> Response {
     let token: String = format!("{:x}", crate::now_secs().wrapping_mul(2_654_435_761));
     let body = format!(

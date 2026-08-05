@@ -55,10 +55,9 @@ pub enum Scenario {
     /// `/cart/add/1` sets the cookie by itself for link priming.
     NeedsBasket,
 
-    /// The Shopify shape: no stable checkout URL. `/checkout` is the basket,
-    /// carrying a control that leads to `/checkouts/cn/<token>`, which is a
-    /// different URL on every run. The scanner has to click through and
-    /// capture wherever it lands.
+    /// No stable checkout URL. `/checkout` is the basket, carrying a control
+    /// that leads to a session URL which differs on every run. The scanner
+    /// has to click through and capture wherever it lands.
     TokenCheckout,
 
     /// `robots.txt` disallows `/checkout`. The scan must refuse before it loads
