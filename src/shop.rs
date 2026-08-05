@@ -363,6 +363,20 @@ fn security_headers(shop: &Shop) -> Vec<(&'static str, String)> {
                  style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
             ),
         ));
+
+        // The nonce differs on every response, as real shops serve it: two
+        // shops fired a Critical per run on nothing else (5 Aug 2026). It
+        // lives in the report-only header so it cannot disable
+        // 'unsafe-inline' for the shop's own inline scripts, and every matrix
+        // row re-proves the value is noise while its presence stays content.
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos();
+        headers.push((
+            "content-security-policy-report-only",
+            format!("script-src 'self' 'nonce-{nonce}' {permitted}"),
+        ));
         headers.push(("x-frame-options", "DENY".to_string()));
     }
 
