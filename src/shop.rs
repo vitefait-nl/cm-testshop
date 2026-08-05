@@ -21,6 +21,7 @@ pub fn router(shop: Shop) -> Router {
         .route("/checkout", get(checkout))
         .route("/product", get(product))
         .route("/cart/add/{id}", get(cart_add))
+        .route("/checkouts/cn/{token}", get(token_checkout))
         .route("/admin", get(admin))
         .route("/robots.txt", get(robots))
         .route("/assets/{file}", get(asset))
@@ -132,8 +133,36 @@ async fn cart_add(State(shop): State<Shop>, Path(id): Path<String>) -> Response 
     )
 }
 
+/// The basket page of a shop whose checkout has no stable URL: the control
+/// leads to a token URL minted per visit, as Shopify does.
+async fn token_basket() -> Response {
+    let token: String = format!("{:x}", crate::now_secs().wrapping_mul(2_654_435_761));
+    let body = format!(
+        r#"<!doctype html>
+<html lang="nl">
+<head><meta charset="utf-8"><title>Winkelwagen | Testwinkel</title></head>
+<body>
+  <h1>Je winkelwagen</h1>
+  <p>Voorbeeldproduct, EUR 99</p>
+  <button name="checkout" onclick="location.href='/checkouts/cn/{token}'">Afrekenen</button>
+</body>
+</html>"#
+    );
+    html(body, Vec::new())
+}
+
+/// The checkout behind that token. Same page every run; only its URL moves.
+async fn token_checkout(State(shop): State<Shop>, Path(token): Path<String>) -> Response {
+    let _ = token;
+    checkout_page(shop).await
+}
+
 /// The page under test.
 async fn checkout(State(shop): State<Shop>, headers: HeaderMap) -> Response {
+    if shop.scenario == Scenario::TokenCheckout {
+        return token_basket().await;
+    }
+
     // Most real checkouts do this: with nothing in the basket there is nothing
     // to pay for, so no payment page is rendered.
     if shop.scenario == Scenario::NeedsBasket {
@@ -158,6 +187,11 @@ async fn checkout(State(shop): State<Shop>, headers: HeaderMap) -> Response {
         }
     }
 
+    checkout_page(shop).await
+}
+
+/// The checkout itself, whatever URL it was reached by.
+async fn checkout_page(shop: Shop) -> Response {
     // Changes every request while the script behind it does not, which is the
     // noise `normalise_url` exists to strip.
     let cache_buster = crate::now_secs().to_string();
