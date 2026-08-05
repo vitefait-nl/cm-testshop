@@ -6,6 +6,7 @@
 
 use axum::body::Body;
 use axum::extract::State;
+use axum::extract::Path;
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -18,6 +19,8 @@ pub fn router(shop: Shop) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/checkout", get(checkout))
+        .route("/product", get(product))
+        .route("/cart/add/{id}", get(cart_add))
         .route("/admin", get(admin))
         .route("/robots.txt", get(robots))
         .route("/assets/{file}", get(asset))
@@ -71,8 +74,90 @@ async fn robots(State(shop): State<Shop>) -> Response {
         .into_response()
 }
 
+/// A product page carrying an add-to-basket control, for click priming.
+/// Reachable only in `needs-basket`; the scanner is given its URL, never
+/// allowed to go looking for it.
+async fn product(State(shop): State<Shop>) -> Response {
+    let _ = shop;
+    html(
+        r#"<!doctype html>
+<html lang="nl">
+<head><meta charset="utf-8"><title>Voorbeeldproduct | Testwinkel</title></head>
+<body>
+  <h1>Voorbeeldproduct</h1>
+  <p>EUR 99</p>
+  <form id="product-form" method="post" action="/cart/add/1">
+    <label for="qty">Aantal</label>
+    <input id="qty" name="qty" value="1">
+    <!-- The scanner clicks this and types nothing, including in the field
+         above, which is there so "nothing is typed" is testable. -->
+    <button class="single_add_to_cart_button" type="button">In winkelwagen</button>
+    <button class="newsletter-signup" type="button">Aanmelden nieuwsbrief</button>
+  </form>
+  <script>
+    document.querySelector(".single_add_to_cart_button")
+      .addEventListener("click", function () {
+        document.cookie = "vf-basket=1; path=/; max-age=3600";
+        document.body.insertAdjacentHTML("beforeend", "<p id=\"added\">Toegevoegd.</p>");
+      });
+  </script>
+</body>
+</html>"#
+            .to_string(),
+        Vec::new(),
+    )
+}
+
+/// The link-based shape: visiting the URL fills the basket, no control to
+/// click. Plenty of Dutch shops expose exactly this.
+async fn cart_add(State(shop): State<Shop>, Path(id): Path<String>) -> Response {
+    let _ = shop;
+    let body = format!(
+        r#"<!doctype html>
+<html lang="nl">
+<head><meta charset="utf-8"><title>Toegevoegd | Testwinkel</title></head>
+<body>
+  <h1>Toegevoegd aan je winkelwagen</h1>
+  <p>Artikel {id} staat in je winkelwagen.</p>
+  <p><a href="/checkout">Naar de kassa</a></p>
+</body>
+</html>"#
+    );
+    html(
+        body,
+        vec![(
+            "set-cookie",
+            "vf-basket=1; Path=/; Max-Age=3600; SameSite=Lax".to_string(),
+        )],
+    )
+}
+
 /// The page under test.
-async fn checkout(State(shop): State<Shop>) -> Response {
+async fn checkout(State(shop): State<Shop>, headers: HeaderMap) -> Response {
+    // Most real checkouts do this: with nothing in the basket there is nothing
+    // to pay for, so no payment page is rendered.
+    if shop.scenario == Scenario::NeedsBasket {
+        let has_basket = headers
+            .get(header::COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|c| c.contains("vf-basket=1"));
+        if !has_basket {
+            return html(
+                r#"<!doctype html>
+<html lang="nl">
+<head><meta charset="utf-8"><title>Winkelwagen leeg | Testwinkel</title></head>
+<body>
+  <h1>Je winkelwagen is leeg</h1>
+  <p>Voeg eerst een product toe.</p>
+  <p><a href="/product">Naar het voorbeeldproduct</a></p>
+</body>
+</html>"#
+                    .to_string(),
+                Vec::new(),
+            );
+        }
+    }
+
     // Changes every request while the script behind it does not, which is the
     // noise `normalise_url` exists to strip.
     let cache_buster = crate::now_secs().to_string();
